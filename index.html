@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tablero de Operaciones</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:Arial,sans-serif;background:#0f172a;color:#fff;margin:0;padding:8px 20px 20px;height:100vh;display:flex;flex-direction:column}
+h1{text-align:center;color:#38bdf8;font-size:48px;margin:10px 0 20px}
+.legend{display:flex;justify-content:center;gap:18px;margin:10px 0 25px}
+.legend span{padding:10px 18px;border-radius:8px;font-size:18px;font-weight:bold}
+.nuevo{background:#22c55e}.proceso{background:#eab308}.revision{background:#3b82f6}.final{background:#a855f7}
+#carousel-container{flex:1;position:relative}
+.board-page{position:absolute;inset:0;display:grid;grid-template-columns:repeat(4,1fr);gap:20px;opacity:0;transition:opacity 1s}
+.board-page.active{opacity:1}
+.column{background:#1e293b;border-radius:14px;padding:18px;display:flex;flex-direction:column;overflow:hidden}
+.column h2{text-align:center;font-size:24px;margin:0;font-weight:bold}
+.header-line{height:2px;background:#38bdf8;margin:12px 0 16px;border-radius:10px}
+.task-list{position:relative;flex:1;overflow:hidden}
+.task-page{position:absolute;inset:0;display:flex;flex-direction:column;gap:8px;opacity:0;transition:.8s}
+.task-page.active{opacity:1}
+.task-card{background:#0f172a;padding:10px;border-left:5px solid #38bdf8;border-radius:4px;font-size:18px}
+.task-card.nuevo{border-color:#22c55e}.task-card.proceso{border-color:#eab308}.task-card.revision{border-color:#3b82f6}.task-card.final{border-color:#a855f7}
+.page-indicator{text-align:center;font-size:12px;color:#9ca3af;margin-top:8px}
+.loading{text-align:center;margin-top:20%}
+</style>
+</head>
+<body>
+<h1>Tareas Operaciones</h1>
+<div class="legend">
+<span class="nuevo">NUEVO</span>
+<span class="proceso">EN PROCESO</span>
+<span class="revision">EN REVISION</span>
+<span class="final">REVISION FINAL</span>
+</div>
+<div id="carousel-container"><div class="loading">Cargando...</div></div>
+<script>
+const sheetId='1qlZpzvzm58JkbPEOaXIuLQt_rr-yrswXGuLlO25E6xM';
+const SUB_TIME=6000;
+let carouselInterval,subIntervals=[];
+let datosActuales={};
+
+function miCallback(r){processData(r);}
+function fetchSheetData(){
+ const old=document.getElementById("script"); if(old) old.remove();
+ const s=document.createElement("script");
+ s.id="script";
+ s.src=`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=responseHandler:miCallback&sheet=tareas&tq=SELECT+B,C,D`;
+ document.body.appendChild(s);
+}
+function processData(json){
+ const rows=json.table.rows,map={};
+ rows.forEach((row,i)=>{
+   if(i===0)return;
+   const tarea=row.c[0]?.v||"";
+   const resp=row.c[1]?.v||"";
+   const estado=(row.c[2]?.v||"").toUpperCase();
+   if(estado==="FINALIZADO")return;
+   resp.split(",").forEach(r=>{
+      r=r.trim();
+      if(!r)return;
+      if(!map[r])map[r]=[];
+      map[r].push({tarea,estado});
+   });
+ });
+
+ const ordenEstados={
+   "REVISION FINAL":1,
+   "EN REVISION":2,
+   "EN PROCESO":3,
+   "NUEVO":4
+ };
+
+ Object.keys(map).forEach(nombre=>{
+   map[nombre].sort((a,b)=>{
+      const e=(ordenEstados[a.estado]||99)-(ordenEstados[b.estado]||99);
+      if(e!==0) return e;
+      return a.tarea.localeCompare(b.tarea,"es",{sensitivity:"base"});
+   });
+ });
+
+ render(map);
+}
+
+
+function render(data){
+ datosActuales=data;
+ subIntervals.forEach(clearInterval); subIntervals=[];
+ const cont=document.getElementById("carousel-container");
+ cont.innerHTML="";
+ const nombres=Object.keys(data);
+ let totalBoards=0;
+
+ for(let i=0;i<nombres.length;i+=4){
+   const board=document.createElement("div");
+   board.className="board-page"+(totalBoards===0?" active":"");
+
+   nombres.slice(i,i+4).forEach(nombre=>{
+      const col=document.createElement("div");
+      col.className="column";
+      col.innerHTML=`<h2>${nombre}</h2><div class="header-line"></div><div class="task-list"></div><div class="page-indicator"></div>`;
+      board.appendChild(col);
+   });
+
+   cont.appendChild(board);
+   totalBoards++;
+ }
+
+ setTimeout(()=>{
+    document.querySelectorAll(".column").forEach(col=>{
+        const nombre=col.querySelector("h2").textContent;
+        construirPaginas(col.querySelector(".task-list"),col.querySelector(".page-indicator"),data[nombre]);
+    });
+    iniciarSubCarrusel();
+ },50);
+
+ iniciarCarrusel(totalBoards);
+}
+
+function construirPaginas(taskList,indicador,tareas){
+
+    taskList.innerHTML="";
+
+    const maxHeight=taskList.clientHeight;
+    let pagina=document.createElement("div");
+    pagina.className="task-page active";
+    taskList.appendChild(pagina);
+
+    let paginas=[pagina];
+
+    tareas.forEach(t=>{
+
+        const card=document.createElement("div");
+        let cls="";
+        if(t.estado==="NUEVO") cls="nuevo";
+        else if(t.estado==="EN PROCESO") cls="proceso";
+        else if(t.estado==="EN REVISION") cls="revision";
+        else if(t.estado==="REVISION FINAL") cls="final";
+
+        card.className="task-card "+cls;
+        card.textContent=t.tarea;
+
+        pagina.appendChild(card);
+
+        if(pagina.scrollHeight>maxHeight){
+            pagina.removeChild(card);
+            pagina=document.createElement("div");
+            pagina.className="task-page";
+            pagina.appendChild(card);
+            taskList.appendChild(pagina);
+            paginas.push(pagina);
+        }
+    });
+
+    indicador.textContent=paginas.length>1?`1/${paginas.length}`:"";
+}
+
+function iniciarSubCarrusel(){
+ document.querySelectorAll(".column").forEach(col=>{
+   const pages=col.querySelectorAll(".task-page");
+   if(pages.length<=1)return;
+   const ind=col.querySelector(".page-indicator");
+   let a=0;
+   const timer=setInterval(()=>{
+      pages[a].classList.remove("active");
+      a=(a+1)%pages.length;
+      pages[a].classList.add("active");
+      ind.textContent=(a+1)+"/"+pages.length;
+   },SUB_TIME);
+   subIntervals.push(timer);
+ });
+}
+
+
+
+function recalcularPaginas(){
+ subIntervals.forEach(clearInterval);
+ subIntervals=[];
+ document.querySelectorAll(".column").forEach(col=>{
+    const nombre=col.querySelector("h2").textContent;
+    construirPaginas(
+      col.querySelector(".task-list"),
+      col.querySelector(".page-indicator"),
+      datosActuales[nombre]||[]
+    );
+ });
+ iniciarSubCarrusel();
+}
+
+
+function iniciarCarrusel(total){
+ if(carouselInterval)clearInterval(carouselInterval);
+ if(total<=1)return;
+ let c=0;
+ carouselInterval=setInterval(()=>{
+   const boards=document.querySelectorAll(".board-page");
+   boards[c].classList.remove("active");
+   c=(c+1)%total;
+   boards[c].classList.add("active");
+ },15000);
+}
+
+let resizeTimer;
+window.addEventListener("resize",()=>{
+ clearTimeout(resizeTimer);
+ resizeTimer=setTimeout(recalcularPaginas,250);
+});
+document.addEventListener("fullscreenchange",recalcularPaginas);
+
+fetchSheetData();
+setInterval(fetchSheetData,60000);
+</script>
+</body>
+</html>
